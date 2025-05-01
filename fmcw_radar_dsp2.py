@@ -69,8 +69,6 @@ def generate_chirp_signal(params, do_plot=True):
         plt.show()
     return tx_signal, t
 
-tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=False)
-
 # ##############################
 # Chirp Return Signal Generation
 # ##############################
@@ -108,9 +106,6 @@ def generate_return_signal(params, t, do_plot=True):
         plt.tight_layout()
         plt.show()
     return rx_signal
-
-
-rx_signal = generate_return_signal(FMCWParams(), t, do_plot=True)
 
 # ##############################
 # Mixing the Received Signal with the Transmitted Signal
@@ -172,6 +167,8 @@ def mix_signals(tx_signal, rx_signal, params, do_plot=True):
         plt.show()
     return mixed_signal
 
+tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=False)
+rx_signal = generate_return_signal(FMCWParams(), t, do_plot=True)
 mixed_signal = mix_signals(tx_signal, rx_signal, FMCWParams(), do_plot=True)
 
 """

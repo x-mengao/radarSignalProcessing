@@ -92,10 +92,6 @@ def generate_return_signal(params, t, do_plot=True):
         plt.show()
     return rx_signal
 
-
-tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=True)
-rx_signal = generate_return_signal(FMCWParams(), t, do_plot=True)
-
 # ##############################
 # Mixing the Received Signal with the Transmitted Signal
 # a.k.a. IQ Demodulation (Complex Mixing)
@@ -151,6 +147,8 @@ def mix_signals(tx_signal, rx_signal, params, do_plot=True):
         plt.show()
     return mixed_signal
 
+tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=True)
+rx_signal = generate_return_signal(FMCWParams(), t, do_plot=True)
 mixed_signal = mix_signals(tx_signal, rx_signal, FMCWParams(), do_plot=True)
 
 """
