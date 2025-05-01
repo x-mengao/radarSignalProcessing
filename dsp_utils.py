@@ -28,5 +28,5 @@ def compute_fft(signal, fs):
     X_magnitude = np.abs(X) / N  # Normalize the magnitude
     frequencies = fftfreq(N, 1/fs)
     # Identify peaks in the spectrum
-    peaks, _ = find_peaks(X_magnitude, height=0.1)  
+    peaks, _ = find_peaks(X_magnitude, height=0.2)  
     return frequencies, X_magnitude, peaks

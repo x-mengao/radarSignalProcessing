@@ -12,9 +12,12 @@
 # Key Takeaways:
 # 1. Frequency change linearly over time, the phase, which is the integral of frequency, is changing quadratically over time.
 # 2. In time domain, the signal seems to be compressed to the right. 
+# 3. The chirps are composed of up-chirp and down-chirp, aiming to resolve the range and velocity of the target.
 # ##############################   
 import numpy as np
 import matplotlib.pyplot as plt
+from scipy import signal
+from scipy.integrate import cumulative_trapezoid
 from dsp_utils import compute_fft
 # ##############################
 # FMCW Parameters
@@ -24,12 +27,12 @@ class FMCWParams:
     def __init__(self):
         self.c = 3e8                                    # Speed of light in m/s
         self.fs = 200e6                                 # Sampling frequency in Hz
-        self.f_start = 0                                # Start frequency in Hz
+        self.f_start = 77e9                                # Start frequency in Hz
         self.f_bw = 50e6                                # Bandwidth in Hz, this is the only band of interest
         self.T_chirp = 100e-6                           # Chirp duration in seconds
         self.slope = self.f_bw / self.T_chirp           # Slope of the chirp signal
         self.R_target = 200                             # Target range in meters
-        self.v_target = 20                              # Target velocity in m/s
+        self.v_target = 150                              # Target velocity in m/s
 
 def subplot_label_tool(ax, title, xlabel, ylabel):
     """
@@ -46,21 +49,27 @@ def generate_chirp_signal(params, do_plot=True):
     """
     Generate a linear frequency modulated (LFM) chirp signal
     """
-    t = np.linspace(0, params.T_chirp, int(params.fs * params.T_chirp), endpoint=False) # linspace is inclusive of the endpoint
+    t = np.linspace(0, params.T_chirp * 2, int(params.fs * params.T_chirp * 2), endpoint=False) # linspace is inclusive of the endpoint
     slope = params.f_bw / params.T_chirp
-    f_upchirp = params.f_start + params.slope * t                   # Frequency profile of the chirp signal
-    phase_upchirp = 2 * np.pi * (params.f_start * t + 0.5 * slope * t**2) # Phase of the chirp signal
-    tx_signal = np.exp(1j * phase_upchirp)                          # Complex representation of TX signal
+    period_chirp = params.T_chirp * 2
+    f_triangle = signal.sawtooth(2 * np.pi * 1 / period_chirp * t, width=0.5) + 1 # Frequency profile of the triangle signal
+    f_triangle = f_triangle * params.f_bw / 2 + params.f_start # Scale the triangle signal to the desired frequency range
+    phase_triangle = 2 * np.pi * cumulative_trapezoid(f_triangle, t, initial=0) # Integrate the frequency to get the phase
+    # f_upchirp = params.f_start + params.slope * t                   # Frequency profile of the chirp signal
+    # phase_upchirp = 2 * np.pi * (params.f_start * t + 0.5 * slope * t**2) # Phase of the chirp signal
+    tx_signal = np.exp(1j * phase_triangle)                          # Complex representation of TX signal
 
     if do_plot:
         fig, ax = plt.subplots(2, 1, figsize=(10, 6))
-        ax[0].plot(t, f_upchirp / 1e9)    # Plot the chirp frequency in time domain
+        ax[0].plot(t, f_triangle / 1e9)    # Plot the chirp frequency in time domain
         ax[1].plot(t, np.real(tx_signal))
         subplot_label_tool(ax[0], 'TX signal frequency profile (demo-only)', 'Time (s)', 'Frequency (GHz)')
         subplot_label_tool(ax[1], 'TX signal (real part) in time domain', 'Time (s)', 'Amplitude')
         plt.tight_layout()
         plt.show()
     return tx_signal, t
+
+tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=False)
 
 # ##############################
 # Chirp Return Signal Generation
@@ -70,30 +79,37 @@ def generate_return_signal(params, t, do_plot=True):
     Generate the return signal from a target
     """
     tau = 2 * params.R_target / params.c                            # Time delay due to roundtrip
-    beat_frequency = params.slope * tau                             # Beat frequency due to range
-    print("Theoretical beat frequency:", beat_frequency)
+    beat_frequency_dist = params.slope * tau                             # Beat frequency due to range
+    wavelength = params.c / params.f_start
+    beat_frequency_vel = 2 * params.v_target / wavelength
+    print("Theoretical beat frequency for distance fd:", beat_frequency_dist)
+    print("Theoretical beat frequency for velocity fv:", beat_frequency_vel)
     # f_doppler = 2 * params.v_target * params.f_start / params.c # Doppler frequency shift
     t_delay = t - tau
-    
-    f_upchirp_delay = params.f_start + params.slope * t             # Frequency profile of the delayed chirp signal
-    phase_upchirp_delay = 2 * np.pi * (params.f_start * t_delay + 0.5 * params.slope * t_delay**2) # Phase of the delayed chirp signal
-    rx_signal = np.exp(1j * phase_upchirp_delay)
+    period_chirp = params.T_chirp * 2
+
+    f_triangle = signal.sawtooth(2 * np.pi * 1 / period_chirp * t, width=0.5) + 1   # Frequency profile of the triangle signal
+    f_triangle = f_triangle * params.f_bw / 2 + params.f_start                      # Scale the triangle signal to the desired frequency range
+
+    f_triangle_delay = signal.sawtooth(2 * np.pi * 1 / period_chirp * t_delay, width=0.5) + 1       # Frequency profile of the triangle signal
+    f_triangle_delay = f_triangle_delay * params.f_bw / 2 + params.f_start + beat_frequency_vel     # Scale and shift the triangle signal to the desired frequency range
+    phase_triangle_delay = 2 * np.pi * cumulative_trapezoid(f_triangle_delay, t_delay, initial=0)   # Integrate the frequency to get the phase
+    rx_signal = np.exp(1j * phase_triangle_delay)
     if do_plot:
         fig, ax = plt.subplots(2, 1, figsize=(10, 6))
-        ax[0].plot(t, f_upchirp_delay / 1e9, label='TX')          # Plot the TX chirp frequency in time domain
-        ax[0].plot(t + tau, f_upchirp_delay / 1e9, color='red', label='RX')     # Plot the RX chirp frequency in time domain
+        ax[0].plot(t, f_triangle / 1e9, label='TX')          # Plot the chirp frequency in time domain
+        ax[0].plot(t + tau, f_triangle_delay / 1e9, color='red',label='RX')     # Plot the chirp frequency in time domain
         ax[1].plot(t, np.real(tx_signal), label='TX')
         ax[1].plot(t, np.real(rx_signal), color='red', label='RX')
         subplot_label_tool(ax[0], 'RX signal frequency profile (demo-only)', 'Time (s)', 'Frequency (GHz)')
         subplot_label_tool(ax[1], 'RX signal (real part) in time domain', 'Time (s)', 'Amplitude')
-        plt.tight_layout()
         ax[0].legend()
         ax[1].legend()
+        plt.tight_layout()
         plt.show()
     return rx_signal
 
 
-tx_signal, t = generate_chirp_signal(FMCWParams(), do_plot=True)
 rx_signal = generate_return_signal(FMCWParams(), t, do_plot=True)
 
 # ##############################
@@ -130,7 +146,11 @@ def mix_signals(tx_signal, rx_signal, params, do_plot=True):
         frequencies_r, X_magnitude_r, peaks_r = compute_fft(np.real(mixed_signal), params.fs)
         frequencies_i, X_magnitude_i, peaks_i = compute_fft(np.imag(mixed_signal), params.fs)
         frequencies_c, X_magnitude_c, peaks_c = compute_fft(mixed_signal, params.fs)
-        estimated_distance = np.abs(frequencies_c[peaks_c][0]) * params.c / (2 * params.slope)
+        fb_up = np.min(np.abs(frequencies_c[peaks_c]))  # Some simplifications / assumptions are made assuming fb_dn is bigger than fb_up.
+        fb_dn = np.max(np.abs(frequencies_c[peaks_c]))  # Both need to consider absoluate value as beat tone
+        estimated_distance = (fb_dn + fb_up) / 4 * (params.c / params.slope)
+        estimated_velocity = (fb_dn - fb_up) / 4 * (params.c / params.f_start)
+
         ax[0,1].plot(frequencies_r, X_magnitude_r)
         ax[0,1].plot(frequencies_r[peaks_r], X_magnitude_r[peaks_r], "x")
         ax[1,1].plot(frequencies_i, X_magnitude_i)
@@ -140,13 +160,14 @@ def mix_signals(tx_signal, rx_signal, params, do_plot=True):
         subplot_label_tool(ax[0,1], 'FFT of mixed signal (real part)', 'Frequency (Hz)', 'Magnitude')
         subplot_label_tool(ax[1,1], 'FFT of mixed signal (imag part)', 'Frequency (Hz)', 'Magnitude')
         subplot_label_tool(ax[2,1], 'FFT of mixed signal', 'Frequency (Hz)', 'Magnitude')
-        ax[0,1].set_xlim(-2e6, 2e6)
-        ax[1,1].set_xlim(-2e6, 2e6)
-        ax[2,1].set_xlim(-2e6, 2e6)
+        ax[0,1].set_xlim(-10e6, 10e6)
+        ax[1,1].set_xlim(-10e6, 10e6)
+        ax[2,1].set_xlim(-10e6, 10e6)
         print("FFT bin width:", params.fs/len(mixed_signal), "Hz")
         print("FFT of mixed signal (real part):", frequencies_r[peaks_r], "Hz")
         print("FFT of mixed signal (imaginary part):", frequencies_i[peaks_i], "Hz")
-        print("FFT of mixed signal:", frequencies_c[peaks_c][0],"Hz | Estimated distance is", estimated_distance, "m")
+        print(f"FFT of mixed signal: {frequencies_c[peaks_c]} Hz")
+        print(f"Estimated distance is {estimated_distance:.2f} m| Estimated speed is {estimated_velocity:.2f} m/s" ) # :.2f prints out 2 digits after decimal
         plt.tight_layout()
         plt.show()
     return mixed_signal
@@ -154,17 +175,24 @@ def mix_signals(tx_signal, rx_signal, params, do_plot=True):
 mixed_signal = mix_signals(tx_signal, rx_signal, FMCWParams(), do_plot=True)
 
 """
-End of LFM chirp signal chain modeling.
+End of FMCW chirp signal chain modeling.
 
 Key Insight:
 When the target starts moving, the beat frequency is further shifted by the Doppler frequency shift.
-The resulting beat frequency becomes the sum of the range and Doppler frequencies. 
-This makes it challenging to determine the sign of the Doppler frequency (positive or negative) 
-based on direction alone.
+The resulting beat frequency becomes the sum and difference of the range and Doppler frequencies. 
 
-Limitation:
-It becomes impossible to separate the Doppler frequency from the beat frequency using this technique 
-because there are two unknowns in one equation.
+Takeaways:
+1. Seems f_start = 0 or 77GHz won't affect phase simulation
+2. Need to make correct estimation on upchirp and downchirp beat tones (sign, find right one)
+3. Most importantly, use correction equations to calculate range and velocity
+
+            fb_dn + fb_up       c
+    range = --------------- * ------
+                  4           slope
+    
+                fb_dn - fb_up   
+    velocity = -------------- * wavelength
+                      4
 
 For further reading, refer to:
 https://wirelesspi.com/fmcw-radar-part-2-velocity-angle-and-radar-data-cube/
